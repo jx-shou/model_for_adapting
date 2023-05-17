@@ -1,3 +1,6 @@
+import torch
+from torch.utils.data import Dataset, DataLoader
+
 class CUDAPrefetcher:
     """Use the CUDA side to accelerate data reading.
 
