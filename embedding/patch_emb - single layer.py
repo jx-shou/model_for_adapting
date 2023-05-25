@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-class PatchEmbeddings(nn.Module):
+class PatchEmbedding(nn.Module):
     '''
     from: image     (batch_size, channels, height, width)
     to:   embedding (batch_size, num_patches, features)
@@ -15,6 +15,13 @@ class PatchEmbeddings(nn.Module):
             kernel_size=conf.patch_size,
             stride=conf.patch_size,
         )
+
+        self.init_weights()
+
+    def init_weights(self):
+        w = self.projection.weight.data
+        w = w.view([w.shape[0], -1])
+        nn.init.xavier_uniform_(w)
 
     def forward(self, x, pri=False):
         _, channels, height, width = x.shape
@@ -31,7 +38,6 @@ class PatchEmbeddings(nn.Module):
         if pri: print(x.shape, 'x.transpose')
 
         return x
-
 
 # config = Config()
 # f = PatchEmbeddings(config)
