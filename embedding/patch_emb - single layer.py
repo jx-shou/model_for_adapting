@@ -43,5 +43,4 @@ class PatchEmbedding(nn.Module):
 # f = PatchEmbeddings(config)
 # x = torch.zeros(2, 3, 224, 224)
 # y = f(x, pri=True)
-# print(y.shape)
 
