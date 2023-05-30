@@ -7,6 +7,15 @@ class ShiftViTConfig:
     image_size = (1024, 1024)
     patch_size = (16, 16)
 
+    assert image_size[0] % patch_size[0] == 0
+    assert image_size[1] % patch_size[1] == 0
+    nh_patches = image_size[0] // patch_size[0]
+    nw_patches = image_size[1] // patch_size[1]
+    num_patches = nh_patches * nw_patches
+    patch_dim = patch_size[0] * patch_size[1] * in_channels
+
+    mask_ratio = 0.75
+
     class sft:
         n_div = 12
         mlp_ratio = 4
@@ -239,7 +248,7 @@ class PatchEmbed(nn.Module):
 # y = f(x, pri=True)
 
 
-
+'''
 class ShiftViTAE(nn.Module):
     def __init__(self, conf):
         super().__init__()
@@ -299,7 +308,108 @@ class ShiftViTAE(nn.Module):
 # x = torch.zeros(4,3,1024,1024).cuda()
 # y = net(x, True)
 
+'''
 
+
+class ShiftViTAE(nn.Module):
+    def __init__(self, conf):
+        super().__init__()
+        self.conf = conf
+        self.patch_embed = PatchEmbed(conf)
+        self.encoder = ShiftViTEncoder(conf)
+        self.decoder = ShiftViTDecoder(conf)
+
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, conf.enc.dims[0]))
+        nn.init.normal_(self.mask_token, std=conf.sft.init_std)
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.normal_(m.weight, std=.02)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, (nn.Conv1d, nn.Conv2d)):
+            nn.init.normal_(m.weight, std=.02)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, (nn.LayerNorm, nn.GroupNorm)):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+
+
+    def mask_for(self, x):
+        num_masks = int(self.conf.mask_ratio * self.conf.num_patches)
+
+        batch_indices = torch.arange(x.shape[0])
+        batch_indices = batch_indices.to(x.device).unsqueeze(-1)
+
+        rand_indices = torch.rand(x.shape[0], self.conf.num_patches)
+        rand_indices = rand_indices.to(x.device).argsort(dim=-1)
+
+        masked_indices = rand_indices[:, :num_masks]
+        unmasked_indices = rand_indices[:, num_masks:]
+
+        # masked_x = x[batch_indices, masked_indices]
+        # unmasked_x = x[batch_indices, unmasked_indices]
+
+        mask_tokens = self.mask_token.expand(x.shape[0], num_masks, -1)
+
+        return {'num_masks': num_masks,
+                'batch_indices': batch_indices,
+                'masked_indices': masked_indices,
+                'unmasked_indices': unmasked_indices,
+                'mask_tokens': mask_tokens,
+                # 'masked': masked_x,
+                # 'unmasked': unmasked_x,
+        }
+
+    def forward(self, x, pri=False):
+        if pri: print(x.shape, 'x')
+
+        x = self.patch_embed(x)
+        if pri: print(x.shape, 'patch_embed')
+
+        assert x.shape[2] == self.conf.nh_patches
+        assert x.shape[3] == self.conf.nw_patches
+        x = rearrange(x, 'b d nh nw -> b (nh nw) d')
+        if pri: print(x.shape, 'x.rearrange')
+
+        mask4emb = self.mask_for(x)
+        # n_masks = masked4emb['num_masks']
+        batch_idx = mask4emb['batch_indices']
+        masked_idx = mask4emb['masked_indices']
+        # unmasked_idx = mask4emb['unmasked_indices']
+        mask_tokens = mask4emb['mask_tokens']
+        if pri: print(mask_tokens.shape, 'mask_tokens')
+
+        x[batch_idx, masked_idx] = mask_tokens
+        x = rearrange(x, 'b (nh nw) d -> b d nh nw', nh=self.conf.nh_patches)
+        if pri: print(x.shape, 'x.rearrange')
+
+        x = self.encoder(x)
+        if pri: print(x.shape, 'encoder')
+
+        x = self.decoder(x)
+        if pri: print(x.shape, 'decoder')
+
+        x = rearrange(
+            x,
+            'b (c hp wp) nh nw -> b c (nh hp) (nw wp)',
+            hp=self.conf.patch_size[0],
+            wp=self.conf.patch_size[1],
+        )
+        if pri: print(x.shape, 'rearrange')
+
+        # x = self.pred(x)
+        # if pri: print(x.shape, 'pred')
+
+        return x
+
+# config = ShiftViTConfig()
+# net = ShiftViTAE(config).cuda()
+# x = torch.zeros(4,3,1024,1024).cuda()
+# y = net(x, True)
 
 
 
